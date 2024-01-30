@@ -6,6 +6,7 @@ import datetime
 import asyncio
 import openai
 from telethon.sync import TelegramClient, events
+from telethon.tl.types import User
 from colorama import init as color_ama
 from bs4 import BeautifulSoup
 import requests
@@ -102,11 +103,19 @@ async def join_main(phone_number):
         async def handle_new_message(event):
             try:
                 message = event.message
+                print(message)
                 message_text = message.raw_text
-                sender_name = message.sender.first_name.lower() if message.sender else ""
+                # Check if the sender is a User
+                if message.sender and isinstance(message.sender, User):
+                    sender_name = message.sender.post_author.lower() if message.sender.post_author else ""
+                elif message.post_author:
+                    # For channels, use the post_author attribute directly
+                    sender_name = message.post_author.lower()
+                else:
+                    sender_name = ""
         
                 # Check if the message is from the user named "poe"
-                if sender_name == "poe":
+                if "poe" in sender_name:
                     coin_tickers = re.findall(r'\$[A-Za-z0-9]+', message_text)
                     if coin_tickers:
                         await handle_coin_tickers(message, coin_tickers)
