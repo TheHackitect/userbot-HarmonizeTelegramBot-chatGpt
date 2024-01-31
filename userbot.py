@@ -44,7 +44,7 @@ openai.api_key = openai_api_key
 openai_params = {
     'engine': 'gpt-3.5-turbo-instruct',
     'temperature': 0.7,
-    'max_tokens': 2000
+    'max_tokens': 100
 }
 
 async def paraphrase_message(message_text):
@@ -66,19 +66,31 @@ async def send_feedback(client, feedback_text):
     except Exception as e:
         print(f"Error sending feedback: {str(e)}")
 
-async def handle_coin_tickers(message, coin_tickers):
-    paraphrased_coin_tickers = await paraphrase_message(" ".join(coin_tickers))
+async def handle_coin_ticker(message_text):
+    paraphrased_coin_ticker_message = await paraphrase_message(f"Paraphrase the info below, in less than 100 words(- make it captivating, with emojis\n- Add a simple heading\n- No intro! just generate output only): \n\n{message_text}")
     dest_entity = await client.get_entity(dest_channel)
-    await client.send_message(dest_entity, paraphrased_coin_tickers)
+    await client.send_message(dest_entity, paraphrased_coin_ticker_message)
 
-async def handle_cointelegraph_links(client, dest_channel, cointelegraph_link):
+async def handle_cointelegraph_link(client, dest_channel, cointelegraph_link):
     try:
-        response = requests.get(cointelegraph_link)
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Referer': 'https://www.cointelegraph.com',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Connection': 'keep-alive',
+            'Cache-Control': 'no-cache',
+            'Pragma': 'no-cache',
+        }
+        response = requests.get(cointelegraph_link, headers=headers, timeout=10)
+        print(response)
         soup = BeautifulSoup(response.text, 'html.parser')
         article_heading = soup.find('h1', class_='post__title').text.strip()
         article_content = "\n".join(p.text.strip() for p in soup.find_all('div', class_='post-content')[-1].find_all('p'))
+        article_content_instruct = f"Paraphrase the info below, in less than 100 words(- make it captivating, with emojis\n- Add a simple heading\n- No intro! just generate output only): \n\n{article_content}"
+        print(article_heading, article_content)
         paraphrased_heading = await paraphrase_message(article_heading)
-        paraphrased_content = await paraphrase_message(article_content)
+        paraphrased_content = await paraphrase_message(article_content_instruct)
         dest_entity = await client.get_entity(dest_channel)
         await client.send_message(dest_entity, f"{paraphrased_heading}\n\n{paraphrased_content}")
         feedback_text = f"Article from cointelegraph paraphrased and sent to {dest_channel}"
@@ -103,7 +115,6 @@ async def join_main(phone_number):
         async def handle_new_message(event):
             try:
                 message = event.message
-                print(message)
                 message_text = message.raw_text
                 # Check if the sender is a User
                 if message.sender and isinstance(message.sender, User):
@@ -116,29 +127,32 @@ async def join_main(phone_number):
         
                 # Check if the message is from the user named "poe"
                 if "poe" in sender_name:
-                    coin_tickers = re.findall(r'\$[A-Za-z0-9]+', message_text)
-                    if coin_tickers:
-                        await handle_coin_tickers(message, coin_tickers)
-
-                    cointelegraph_links = re.findall(r'https://cointelegraph\.com/news/[\w-]+', message_text)
-                    if cointelegraph_links:
-                        await handle_cointelegraph_links(client, dest_channel, cointelegraph_links[0])
+                    coin_ticker = re.search(r'\$[A-Za-z0-9]+', str(message_text))
+                    cointelegraph_link = re.search(r'https://cointelegraph\.com/[\w/-]+', str(message))
+                    if coin_ticker:
+                        if cointelegraph_link:
+                            await handle_coin_ticker(message_text)
+                        else:
+                            message_text = f'{message_text}'
+                    # Check if the message has a link
+                    elif cointelegraph_link:
+                        await handle_cointelegraph_link(client, dest_channel, cointelegraph_link.group())
 
                     # Check if the message is an image with a caption
-                    if message.media and hasattr(message, 'caption') and message.caption:
+                    elif message.media and hasattr(message, 'caption') and message.caption:
                         await handle_image_caption(message, dest_channel)
-
-                    paraphrased_message = await paraphrase_message(message_text)
-                    if paraphrased_message is None or paraphrased_message == "":
-                        dest_entity = await client.get_entity(dest_channel)
-                        await client.send_message(dest_entity, paraphrased_message)
-                        feedback_text = f"Message Not Paraphrased\n\n Sent to:\n\n {dest_channel}:\n\n Message:\n\n{paraphrased_message}"
-                        await send_feedback(client, feedback_text)
                     else:
-                        dest_entity = await client.get_entity(dest_channel)
-                        await client.send_message(dest_entity, paraphrased_message)
-                        feedback_text = f"Message paraphrased and sent to {dest_channel}: {paraphrased_message}"
-                        await send_feedback(client, feedback_text)
+                        paraphrased_message = await paraphrase_message(message_text)
+                        if paraphrased_message is None or paraphrased_message == "":
+                            dest_entity = await client.get_entity(dest_channel)
+                            await client.send_message(dest_entity, message_text)
+                            feedback_text = f"Message Not Paraphrased\n\n Sent to:\n\n {dest_channel}:\n\n Message:\n\n{paraphrased_message}"
+                            await send_feedback(client, feedback_text)
+                        else:
+                            dest_entity = await client.get_entity(dest_channel)
+                            await client.send_message(dest_entity, paraphrased_message)
+                            feedback_text = f"Message paraphrased and sent to {dest_channel}: {paraphrased_message}"
+                            await send_feedback(client, feedback_text)
                 else:
                     pass
             except Exception as e:
@@ -152,6 +166,6 @@ if __name__ == "__main__":
     loop = asyncio.get_event_loop()
     for phone_number in numbers:
         loop.create_task(join_main(phone_number))
-
+ 
     print(generate_logo())
     loop.run_forever()
